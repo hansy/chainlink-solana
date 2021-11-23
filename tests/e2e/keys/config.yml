@@ -1,0 +1,6 @@
+json_rpc_url: http://host.docker.internal:8899
+websocket_url: ws://host.docker.internal:8900
+keypair_path: keys/id.json
+address_labels:
+  "11111111111111111111111111111111": ""
+commitment: finalized

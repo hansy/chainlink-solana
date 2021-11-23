@@ -4,7 +4,7 @@ use arrayvec::arrayvec;
 
 use access_controller::AccessController;
 
-declare_id!("HJmKEmXD9bcCH8UuncvoHD8RVCo7UHSWarRffy1go9X4");
+declare_id!("CVmCNhhYxQHRjWJuGDUio3JtNnsTfHTVWyTgq6UozQSw");
 
 static THRESHOLD_MULTIPLIER: u128 = 100000;
 
