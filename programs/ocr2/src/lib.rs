@@ -154,7 +154,7 @@ pub mod ocr2 {
         require!(f != 0, InvalidInput);
         require!(len <= MAX_ORACLES, TooManyOracles);
         let n = len as u8; // safe since it's less than MAX_ORACLES
-        require!(3 * f < n, InvalidInput); // TODO custom error
+        require!(3 * f < n, InvalidInput);
 
         let State {
             ref mut config,
@@ -565,6 +565,39 @@ pub mod ocr2 {
         oracle.payee = std::mem::take(&mut oracle.proposed_payee);
         Ok(())
     }
+
+    /// The query instruction takes a `Query` and serializes the response in a fixed format. That way queries
+    /// are not bound to the underlying layout.
+    pub fn query(ctx: Context<Query>, query: query::v1::Query) -> ProgramResult {
+        use query::v1;
+        use std::ops::DerefMut;
+
+        let state = ctx.accounts.state.load()?;
+        // let transmissions = ctx.accounts.transmissions.load()?;
+
+        match query {
+            v1::Query::LatestRoundData => {
+                unimplemented!()
+            }
+            v1::Query::LinkAvailableForPayment => {
+                // TODO: this needs the token_vault passed in
+                unimplemented!()
+            }
+            v1::Query::LatestConfig => {
+                use crate::query::LatestConfig;
+                let config = state.config;
+
+                let data = LatestConfig {
+                    config_count: config.config_count,
+                    config_digest: config.latest_config_digest,
+                    block_number: config.latest_config_block_number,
+                };
+                data.serialize(ctx.accounts.buffer.try_borrow_mut_data()?.deref_mut())?;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[inline(always)]
@@ -932,27 +965,28 @@ pub enum ErrorCode {
 pub mod query {
     use super::*;
 
-    pub struct ConfigDetails {
+    #[derive(AnchorSerialize, AnchorDeserialize)]
+    pub struct LatestConfig {
         pub config_count: u32,
         pub config_digest: [u8; 32],
         pub block_number: u64,
     }
 
-    // wrapper struct for query response
-    pub struct LinkAvailableForPaymentDetails {
+    #[derive(AnchorSerialize, AnchorDeserialize)]
+    pub struct LinkAvailableForPayment {
         pub available_balance: u64,
     }
 
-    // wrapper struct for query response
-    pub struct OracleObservationCountDetails {
+    #[derive(AnchorSerialize, AnchorDeserialize)]
+    pub struct OracleObservationCount {
         pub count: u32,
     }
 
-    pub fn latest_config_details(account: &AccountInfo) -> Result<ConfigDetails> {
+    pub fn latest_config_details(account: &AccountInfo) -> Result<LatestConfig> {
         let loader = AccountLoader::<State>::try_from(account)?;
         let state = loader.load()?;
         let config = state.config;
-        Ok(ConfigDetails {
+        Ok(LatestConfig {
             config_count: config.config_count,
             config_digest: config.latest_config_digest,
             block_number: config.latest_config_block_number,
@@ -965,7 +999,7 @@ pub mod query {
     pub fn link_available_for_payment(
         account: &AccountInfo,
         token_vault: &AccountInfo,
-    ) -> Result<LinkAvailableForPaymentDetails> {
+    ) -> Result<LinkAvailableForPayment> {
         // load in our programs state from account
         let loader = AccountLoader::<State>::try_from(account)?;
         let state = loader.load()?;
@@ -984,9 +1018,7 @@ pub mod query {
         let available_balance = balance.saturating_sub(link_due);
 
         // return data
-        Ok(LinkAvailableForPaymentDetails {
-            available_balance: available_balance,
-        })
+        Ok(LinkAvailableForPayment { available_balance })
     }
 
     // Returns the total number of observation counts for a specific transmitter
@@ -995,7 +1027,7 @@ pub mod query {
     pub fn oracle_observation_count(
         account: &AccountInfo,
         transmitter: &AccountInfo,
-    ) -> Result<OracleObservationCountDetails> {
+    ) -> Result<OracleObservationCount> {
         // load in our programs state from account
         let loader = AccountLoader::<State>::try_from(account)?;
         let state = loader.load()?;
@@ -1014,6 +1046,20 @@ pub mod query {
             .saturating_sub(oracle.from_round_id);
 
         // return data
-        Ok(OracleObservationCountDetails { count: count })
+        Ok(OracleObservationCount { count })
+    }
+
+    pub mod v1 {
+        use super::*;
+
+        #[derive(AnchorSerialize, AnchorDeserialize)]
+        pub enum Query {
+            LatestConfig,
+            LinkAvailableForPayment,
+            // Description
+            // Decimals
+            // RoundData(round_id)
+            LatestRoundData,
+        }
     }
 }

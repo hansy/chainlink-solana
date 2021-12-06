@@ -12,7 +12,6 @@ import {
   Token,
   ASSOCIATED_TOKEN_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
-  u64,
 } from '@solana/spl-token';
 import { assert } from "chai";
 
@@ -47,20 +46,31 @@ describe('ocr2', async () => {
 
   const decimals = 18;
   const description = "ETH/BTC";
+  
+  let token: Token, tokenClient: Token,
+    vaultAuthority: PublicKey, vaultNonce: number,
+    validatorAuthority: PublicKey, validatorNonce: number,
+    tokenVault: PublicKey;
+    
+  const program = anchor.workspace.Ocr2;
+  const accessController = anchor.workspace.AccessController;
+  const deviationFlaggingValidator = anchor.workspace.DeviationFlaggingValidator;
+  
+  const minAnswer = 1;
+  const maxAnswer = 1000;
 
-  it('Is initialized!', async () => {
-    const program = anchor.workspace.Ocr2;
-    const accessController = anchor.workspace.AccessController;
-    const deviationFlaggingValidator = anchor.workspace.DeviationFlaggingValidator;
 
-    // Fund the payer
+  // Fund the payer
+  it('funds the payer', async () => {
     await provider.connection.confirmTransaction(
       await provider.connection.requestAirdrop(payer.publicKey, 10000000000),
       "confirmed"
     );
-
+  });
+  
+  it('Creates the LINK token', async () => {
     // Create the LINK token
-    const token = await Token.createMint(
+    token = await Token.createMint(
       provider.connection,
       payer,
       mintAuthority.publicKey,
@@ -69,15 +79,16 @@ describe('ocr2', async () => {
       TOKEN_PROGRAM_ID,
     );
 
-    const tokenClient = new Token(
+    tokenClient = new Token(
       provider.connection,
       token.publicKey,
       TOKEN_PROGRAM_ID,
       // @ts-ignore
       program.provider.wallet.payer
     );
+  });
 
-    console.log("Creating access controllers")
+  it('Creates the access controllers', async () => {
     await accessController.rpc.initialize({
       accounts: {
         state: billingAccessController.publicKey,
@@ -104,13 +115,14 @@ describe('ocr2', async () => {
         await accessController.account.accessController.createInstruction(requesterAccessController),
       ],
     });
+  });
 
-    const [validatorAuthority, validatorNonce] = await PublicKey.findProgramAddress(
+  it('Creates the validator', async () => {
+    [validatorAuthority, validatorNonce] = await PublicKey.findProgramAddress(
       [Buffer.from(anchor.utils.bytes.utf8.encode("validator")), state.publicKey.toBuffer()],
       program.programId
     );
 
-    console.log("Creating validator")
     await deviationFlaggingValidator.rpc.initialize(
       {
       accounts: {
@@ -125,28 +137,24 @@ describe('ocr2', async () => {
       ],
     });
 
-    // Initialize an OCR2 instance
-    const minAnswer = 1;
-    const maxAnswer = 1000;
-
-    const [vaultAuthority, nonce] = await PublicKey.findProgramAddress(
+    [vaultAuthority, vaultNonce] = await PublicKey.findProgramAddress(
       [Buffer.from(anchor.utils.bytes.utf8.encode("vault")), state.publicKey.toBuffer()],
       program.programId
     );
+  });
 
-    console.log("Creating token");
-
+  it('Creates the token vault', async () => {
     // Create an associated token account for LINK, owned by the program instance
-    const tokenVault = await Token.getAssociatedTokenAddress(
+    tokenVault = await Token.getAssociatedTokenAddress(
       ASSOCIATED_TOKEN_PROGRAM_ID,
       TOKEN_PROGRAM_ID,
       token.publicKey,
       vaultAuthority,
       true, // allowOwnerOffCurve: seems required since a PDA isn't a valid keypair
     );
+  });
 
-    console.log("Initializing");
-
+  it('Initializes an OCR2 feed', async () => {
     console.log("state", state.publicKey.toBase58());
     console.log("transmissions", transmissions.publicKey.toBase58());
     console.log("payer", provider.wallet.publicKey.toBase58());
@@ -156,7 +164,7 @@ describe('ocr2', async () => {
     console.log("vaultAuthority", vaultAuthority.toBase58());
     console.log("placeholder", placeholder.toBase58());
 
-    await program.rpc.initialize(nonce, new BN(minAnswer), new BN(maxAnswer), decimals, description, {
+    await program.rpc.initialize(vaultNonce, new BN(minAnswer), new BN(maxAnswer), decimals, description, {
       accounts: {
         state: state.publicKey,
         transmissions: transmissions.publicKey,
