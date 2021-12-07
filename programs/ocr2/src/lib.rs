@@ -595,7 +595,6 @@ pub mod ocr2 {
                 data.serialize(ctx.accounts.buffer.try_borrow_mut_data()?.deref_mut())?;
             }
         }
-
         Ok(())
     }
 }

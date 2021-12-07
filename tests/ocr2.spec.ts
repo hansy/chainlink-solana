@@ -12,6 +12,7 @@ import {
   Token,
   ASSOCIATED_TOKEN_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
+  u64,
 } from '@solana/spl-token';
 import { assert } from "chai";
 
@@ -20,6 +21,10 @@ import * as secp256k1 from "secp256k1";
 import { keccak256 } from "ethereum-cryptography/keccak";
 
 // generate a new keypair using `solana-keygen new -o id.json`
+
+let ethereumAddress = (publicKey: Buffer) => {
+  return keccak256(publicKey).slice(12)
+};
 
 describe('ocr2', async () => {
 
@@ -46,22 +51,27 @@ describe('ocr2', async () => {
 
   const decimals = 18;
   const description = "ETH/BTC";
+
+  const minAnswer = 1;
+  const maxAnswer = 1000;
   
-  let token: Token, tokenClient: Token,
-    vaultAuthority: PublicKey, vaultNonce: number,
-    validatorAuthority: PublicKey, validatorNonce: number,
-    tokenVault: PublicKey;
-    
   const program = anchor.workspace.Ocr2;
   const accessController = anchor.workspace.AccessController;
   const deviationFlaggingValidator = anchor.workspace.DeviationFlaggingValidator;
   
-  const minAnswer = 1;
-  const maxAnswer = 1000;
+  let token: Token, tokenClient: Token;
+  let validatorAuthority: PublicKey, validatorNonce: number;
+  let tokenVault: PublicKey, vaultAuthority: PublicKey, vaultNonce: number;
+  
+  let oracles = [];
+  const f = 2;
+  // NOTE: 17 is the most we can fit into one setConfig if we use a different payer
+  // if the owner == payer then we can fit 19
+  const n = 19; // min: 3 * f + 1;
 
 
-  // Fund the payer
-  it('funds the payer', async () => {
+  it('Funds the payer', async () => {
+    // Fund the payer
     await provider.connection.confirmTransaction(
       await provider.connection.requestAirdrop(payer.publicKey, 10000000000),
       "confirmed"
@@ -87,8 +97,8 @@ describe('ocr2', async () => {
       program.provider.wallet.payer
     );
   });
-
-  it('Creates the access controllers', async () => {
+  
+  it('Creates access controllers', async () => {
     await accessController.rpc.initialize({
       accounts: {
         state: billingAccessController.publicKey,
@@ -117,14 +127,13 @@ describe('ocr2', async () => {
     });
   });
 
-  it('Creates the validator', async () => {
+  it('Creates a validator', async () => {
     [validatorAuthority, validatorNonce] = await PublicKey.findProgramAddress(
       [Buffer.from(anchor.utils.bytes.utf8.encode("validator")), state.publicKey.toBuffer()],
       program.programId
     );
 
-    await deviationFlaggingValidator.rpc.initialize(
-      {
+    await deviationFlaggingValidator.rpc.initialize({
       accounts: {
         state: validator.publicKey,
         owner: owner.publicKey,
@@ -136,14 +145,14 @@ describe('ocr2', async () => {
         await deviationFlaggingValidator.account.validator.createInstruction(validator),
       ],
     });
-
+  });
+  
+  it('Creates the token vault', async () => {
     [vaultAuthority, vaultNonce] = await PublicKey.findProgramAddress(
       [Buffer.from(anchor.utils.bytes.utf8.encode("vault")), state.publicKey.toBuffer()],
       program.programId
     );
-  });
 
-  it('Creates the token vault', async () => {
     // Create an associated token account for LINK, owned by the program instance
     tokenVault = await Token.getAssociatedTokenAddress(
       ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -153,8 +162,10 @@ describe('ocr2', async () => {
       true, // allowOwnerOffCurve: seems required since a PDA isn't a valid keypair
     );
   });
+  
+  it('Initializes the OCR2 feed', async () => {
+    console.log("Initializing...");
 
-  it('Initializes an OCR2 feed', async () => {
     console.log("state", state.publicKey.toBase58());
     console.log("transmissions", transmissions.publicKey.toBase58());
     console.log("payer", provider.wallet.publicKey.toBase58());
@@ -193,13 +204,7 @@ describe('ocr2', async () => {
     assert.ok(config.maxAnswer.toNumber() == maxAnswer);
     assert.ok(config.decimals == 18);
 
-    const f = 2;
-    // NOTE: 17 is the most we can fit into one setConfig if we use a different payer
-    // if the owner == payer then we can fit 19
-    const n = 19; // min: 3 * f + 1;
-
     console.log(`Generating ${n} oracles...`);
-    let oracles = [];
     for (let i = 0; i < n; i++) {
       let secretKey = randomBytes(32);
       let transmitter = Keypair.generate();
@@ -265,41 +270,36 @@ describe('ocr2', async () => {
     });
     account = await program.account.state.fetch(state.publicKey);
     config = account.config;
-    console.log(config);
     assert.ok(config.offchainConfig.len == 6);
     assert.deepEqual(config.offchainConfig.xs.slice(0, config.offchainConfig.len), [4,5,6,4,5,6]);
 
-    let ethereumAddress = (publicKey: Buffer) => {
-      return keccak256(publicKey).slice(12)
-    };
-    
     // 3 byte header + 32+32 addresses + 64 program_id + 64 byte signature + 32 byte block hash + 897 bytes
     // 17 = 897
     // 18 = 949 => serializes to 1249
     // so 300 byte overhead -> 73 bytes unaccounted (64 + 9?)
     // if we ensure owner == feePayer we save some space
-    let i = await program.instruction.setConfig(oracles.map((oracle) => ({
-      signer: ethereumAddress(Buffer.from(oracle.signer.publicKey)),
-      transmitter: oracle.transmitter.publicKey,
-    })), f, 
-      // onchain_config, 
-      {
-        accounts: {
-          state: state.publicKey,
-          authority: owner.publicKey,
-        },
-        signers: [],
-              });
-    console.log(i.data.length);
-    console.log(Array.from(i.data));
-      
+    // let i = await program.instruction.setConfig(oracles.map((oracle) => ({
+    //     signer: ethereumAddress(Buffer.from(oracle.signer.publicKey)),
+    //     transmitter: oracle.transmitter.publicKey,
+    //   })),
+    //   f, 
+    //   {
+    //     accounts: {
+    //       state: state.publicKey,
+    //       authority: owner.publicKey,
+    //     },
+    //     signers: [],
+    // });
+    // console.log(i.data.length);
+    // console.log(Array.from(i.data));
 
     // Call setConfig
     console.log("setConfig");
     await program.rpc.setConfig(oracles.map((oracle) => ({
-      signer: ethereumAddress(Buffer.from(oracle.signer.publicKey)),
-      transmitter: oracle.transmitter.publicKey,
-    })), f,
+        signer: ethereumAddress(Buffer.from(oracle.signer.publicKey)),
+        transmitter: oracle.transmitter.publicKey,
+      })),
+      f,
       {
         accounts: {
           state: state.publicKey,
@@ -349,9 +349,10 @@ describe('ocr2', async () => {
       },
       signers: [],
     });
-
-    account = await program.account.state.fetch(state.publicKey);
-    console.log(account);
+  });
+  
+  it('Transmits a round', async () => {
+    let account = await program.account.state.fetch(state.publicKey);
 
 		// // log raw state account data
 		// let rawAccount = await provider.connection.getAccountInfo(state.publicKey);
@@ -395,7 +396,6 @@ describe('ocr2', async () => {
 
     const transmitter = oracles[0].transmitter;
 
-
     const tx = new Transaction();
     tx.add(
       new TransactionInstruction({
@@ -429,34 +429,11 @@ describe('ocr2', async () => {
       }
       throw translatedErr;
     }
-    // await program.rpc.transmit(
-    //   validatorNonce,
-    //   Buffer.concat(
-    //     [
-    //       Buffer.from(report_context),
-    //       Buffer.from(raw_report),
-    //       Buffer.from(raw_signatures),
-    //     ]
-    //   ),
-    //   {
-    //     accounts: {
-    //       state: state.publicKey,
-    //       transmitter: transmitter.publicKey,
-    //       transmissions: transmissions.publicKey,
+  });
 
-    //       validatorProgram: deviationFlaggingValidator.programId,
-    //       validator: validator.publicKey,
-    //       validatorAuthority: validatorAuthority,
-    //       validatorAccessController: billingAccessController.publicKey,
-    //     },
-    //     signers: [transmitter],
-    //   }
-    // );
-
+  it('Withdraws funds', async () => {
     const recipient = await token.createAccount(placeholder);
     let recipientTokenAccount = await token.getOrCreateAssociatedAccountInfo(recipient);
-
-    console.log("Withdrawing funds");
 
     await program.rpc.withdrawFunds(
       new BN(1),
@@ -475,17 +452,16 @@ describe('ocr2', async () => {
     );
 
     let acc = await tokenClient.getAccountInfo(tokenVault);
-    console.log(acc);
     recipientTokenAccount = await tokenClient.getOrCreateAssociatedAccountInfo(recipient);
-    console.log(recipientTokenAccount);
-    console.log(recipientTokenAccount.amount.toString(10));
     assert.ok(recipientTokenAccount.amount.toNumber() === 1);
+  });
 
-    console.log("Calling setConfig again should move payments over to leftover payments");
+  it('Calling setConfig again should move payments over to leftover payments', async () => {
     await program.rpc.setConfig(oracles.map((oracle) => ({
-      signer: ethereumAddress(Buffer.from(oracle.signer.publicKey)),
-      transmitter: oracle.transmitter.publicKey,
-    })), f,
+        signer: ethereumAddress(Buffer.from(oracle.signer.publicKey)),
+        transmitter: oracle.transmitter.publicKey,
+      })),
+      f,
       {
         accounts: {
           state: state.publicKey,
@@ -493,7 +469,7 @@ describe('ocr2', async () => {
         },
         signers: [],
     });
-    account = await program.account.state.fetch(state.publicKey);
+    let account = await program.account.state.fetch(state.publicKey);
     let leftovers = account.leftoverPayments.slice(0, account.leftoverPaymentsLen);
     for (let leftover of leftovers) {
       assert.ok(leftover.amount.toNumber() !== 0);
@@ -520,7 +496,7 @@ describe('ocr2', async () => {
     account = await program.account.state.fetch(state.publicKey);
     assert.ok(account.leftoverPaymentsLen == 0);
 
-		// // log raw transmissions account data
+		// log raw transmissions account data
 		// let rawTransmissions = await provider.connection.getAccountInfo(transmissions.publicKey);
 		// console.log([...rawTransmissions.data])
   });
