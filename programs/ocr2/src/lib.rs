@@ -25,6 +25,16 @@ pub struct NewOracle {
     pub transmitter: Pubkey,
 }
 
+#[derive(AnchorSerialize, AnchorDeserialize)]
+pub enum Scope {
+    LatestConfig,
+    LinkAvailableForPayment,
+    // Description
+    // Decimals
+    // RoundData(round_id)
+    LatestRoundData,
+}
+
 #[program]
 pub mod ocr2 {
     use super::*;
@@ -568,22 +578,21 @@ pub mod ocr2 {
 
     /// The query instruction takes a `Query` and serializes the response in a fixed format. That way queries
     /// are not bound to the underlying layout.
-    pub fn query(ctx: Context<Query>, query: query::v1::Query) -> ProgramResult {
-        use query::v1;
+    pub fn query(ctx: Context<Query>, scope: Scope) -> ProgramResult {
         use std::ops::DerefMut;
 
         let state = ctx.accounts.state.load()?;
         // let transmissions = ctx.accounts.transmissions.load()?;
 
-        match query {
-            v1::Query::LatestRoundData => {
+        match scope {
+            Scope::LatestRoundData => {
                 unimplemented!()
             }
-            v1::Query::LinkAvailableForPayment => {
+            Scope::LinkAvailableForPayment => {
                 // TODO: this needs the token_vault passed in
                 unimplemented!()
             }
-            v1::Query::LatestConfig => {
+            Scope::LatestConfig => {
                 use crate::query::LatestConfig;
                 let config = state.config;
 
@@ -1046,19 +1055,5 @@ pub mod query {
 
         // return data
         Ok(OracleObservationCount { count })
-    }
-
-    pub mod v1 {
-        use super::*;
-
-        #[derive(AnchorSerialize, AnchorDeserialize)]
-        pub enum Query {
-            LatestConfig,
-            LinkAvailableForPayment,
-            // Description
-            // Decimals
-            // RoundData(round_id)
-            LatestRoundData,
-        }
     }
 }
