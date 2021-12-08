@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
@@ -43,7 +42,7 @@ func New(ctx *pulumi.Context) (Deployer, error) {
 	// fmt.Printf("yarn is available at %s\n", yarn)
 	//
 	// // Change path to root directory
-	// cwd, _ := os.Getwd()
+	cwd, _ := os.Getwd()
 	// os.Chdir(filepath.Join(cwd, ".."))
 	//
 	// fmt.Println("Installing dependencies")
@@ -84,6 +83,11 @@ func New(ctx *pulumi.Context) (Deployer, error) {
 }
 
 func (d *Deployer) Load() error {
+	// TODO: remove this - temporarily needed as artifacts are read directly from the root directory
+	// won't be needed once it reads from release artifacts?
+	cwd, _ := os.Getwd()
+	os.Chdir(filepath.Join(cwd, "..")) // go from ops folder to root
+
 	// Access Controller contract deployment
 	fmt.Println("Deploying Access Controller...")
 	err := d.gauntlet.ExecCommand(
@@ -205,4 +209,8 @@ func (d Deployer) InitOCR(keys []map[string]string) error {
 
 func (d Deployer) OCR2Address() string {
 	return d.States[OCRFeed]
+}
+
+func (d Deployer) Addresses() map[int]string {
+	return d.States
 }
