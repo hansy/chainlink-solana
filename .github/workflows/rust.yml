@@ -15,4 +15,5 @@ jobs:
     - run: echo $HOME
     - run: echo $PATH
     - run: yarn install --frozen-lockfile
+    - run: solana-keygen new -o id.json
     - run: anchor test
