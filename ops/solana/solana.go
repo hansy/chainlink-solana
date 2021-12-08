@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
@@ -152,7 +153,7 @@ func (d *Deployer) DeployOCR() error {
 		d.gauntlet.Flag("network", d.network),
 		d.gauntlet.Flag("description", "ETH/USD"),
 		d.gauntlet.Flag("decimals", "8"),
-		d.gauntlet.Flag("maxAnswer", "100000"),
+		d.gauntlet.Flag("maxAnswer", "100000000000000000000"),
 		d.gauntlet.Flag("minAnswer", "0"),
 		d.gauntlet.Flag("link", d.States[LINK]),
 	)
@@ -203,6 +204,20 @@ func (d Deployer) InitOCR(keys []map[string]string) error {
 
 	if err != nil {
 		return errors.New("OCR 2 set config failed")
+	}
+	return nil
+}
+
+func (d Deployer) Fund(addresses []string) error {
+	if _, err := exec.LookPath("solana"); err != nil {
+		return errors.New("'solana' is not available in commandline")
+	}
+	for _, a := range addresses {
+		// TODO: do addresses need to parsed into base58 form?
+		msg := relayUtils.LogStatus(fmt.Sprintf("funded %s", a))
+		if _, err := exec.Command("solana", "airdrop", "100", a).Output(); msg.Check(err) != nil {
+			return err
+		}
 	}
 	return nil
 }
